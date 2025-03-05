@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntSize
 import androidx.compose.ui.unit.takeOrElse
 import androidx.compose.ui.unit.toSize
+import kotlin.jvm.JvmInline
 
 internal val ModifierLocalCurrentHazeZIndex = modifierLocalOf<Float?> { null }
 
@@ -379,25 +380,25 @@ class HazeEffectNode(
 
   @OptIn(ExperimentalHazeApi::class)
   private fun DrawScope.drawEffectWithGraphicsLayer() {
+    val scaleFactor = calculateInputScaleFactor()
+    val inflatedSize = (layerSize * scaleFactor).roundToIntSize()
+    // This is the topLeft in the inflated bounds where the real are should be at [0,0]
+    val inflatedOffset = layerOffset
+
+    if (inflatedSize.width <= 0 || inflatedSize.height <= 0) {
+      // If we have a 0px dimension we can't do anything so just return
+      return
+    }
+
+    val bg = resolveBackgroundColor()
+    require(bg.isSpecified) { "backgroundColor not specified. Please provide a color." }
+
     // Now we need to draw `contentNode` into each of an 'effect' graphic layers.
     // The RenderEffect applied will provide the blurring effect.
     val graphicsContext = currentValueOf(LocalGraphicsContext)
     val layer = graphicsContext.createGraphicsLayer()
 
-    // The layer size is usually than the bounds. This is so that we include enough
-    // content around the edges to keep the blurring uniform. Without the extra border,
-    // the blur will naturally fade out at the edges.
-    val scaleFactor = calculateInputScaleFactor()
-    val inflatedSize = layerSize * scaleFactor
-    // This is the topLeft in the inflated bounds where the real are should be at [0,0]
-    val inflatedOffset = layerOffset
-
-    val bg = resolveBackgroundColor()
-    require(bg.isSpecified) { "backgroundColor not specified. Please provide a color." }
-
-    val bounds = Rect(positionOnScreen, size)
-
-    layer.record(inflatedSize.roundToIntSize()) {
+    layer.record(size = inflatedSize) {
       drawRect(bg)
 
       clipRect {
@@ -410,8 +411,9 @@ class HazeEffectNode(
                   "Alternatively you can use can `canDrawArea` to to filter out parent areas."
               }
 
+              val effectNodeBounds = Rect(positionOnScreen, size)
               val areaBounds = Snapshot.withoutReadObservation { area.bounds }
-              if (areaBounds == null || !bounds.overlaps(areaBounds)) {
+              if (areaBounds == null || !effectNodeBounds.overlaps(areaBounds)) {
                 HazeLogger.d(TAG) { "Area does not overlap us. Skipping... $area" }
                 continue
               }
@@ -614,6 +616,16 @@ sealed interface HazeProgressive {
     val radius: Float = Float.POSITIVE_INFINITY,
     val radiusIntensity: Float = 0f,
   ) : HazeProgressive
+
+  /**
+   * A progressive effect which is derived by using the provided [Brush] as an alpha mask.
+   *
+   * This allows custom effects driven from a brush. It could be using a bitmap shader, via
+   * a [ShaderBrush] or something more complex. The RGB values from the brush's pixels will
+   * be ignored, only the alpha values are used.
+   */
+  @JvmInline
+  value class Brush(val brush: androidx.compose.ui.graphics.Brush) : HazeProgressive
 
   companion object {
     /**
